@@ -1830,11 +1830,12 @@
           </span>
           <span class="chevron">›</span>
         </div>
-        <div class="nav-submenu" id="submenu-images">
-          <div class="nav-subitem" data-view="images" data-cat="routiere"><span class="dot-sub"></span>Images infractions</div>
-          <div class="nav-subitem" data-view="images" data-cat="installation"><span class="dot-sub"></span>Image installations anarchiques</div>
-          <div class="nav-subitem" data-view="images" data-cat="orpaillage"><span class="dot-sub"></span>Images Orpaillage Clandestin</div>
-        </div>
+       <div class="nav-submenu" id="submenu-images">
+  <div class="nav-subitem" data-view="images" data-cat="capture"><span class="dot-sub"></span>Photos capture</div>
+  <div class="nav-subitem" data-view="images" data-cat="routiere"><span class="dot-sub"></span>Images infractions</div>
+  <div class="nav-subitem" data-view="images" data-cat="installation"><span class="dot-sub"></span>Image installations anarchiques</div>
+  <div class="nav-subitem" data-view="images" data-cat="orpaillage"><span class="dot-sub"></span>Images Orpaillage Clandestin</div>
+</div>
       </div>
       <div class="nav-group">
         <div class="nav-item group-toggle" data-group="pv">
@@ -3074,19 +3075,22 @@
     return null;
   }
 
-  function filterByCategory(items, view){
-    const cat = currentCategory[view];
-    if(!cat || cat === 'all') return items;
-    
-    return items.filter(it => {
-      if(it.type !== 'infraction') return false;
-      const subcat = it.subcategory || 'simple';
-      if(cat === 'routiere') return subcat === 'ir';
-      if(cat === 'installation') return subcat === 'an';
-      if(cat === 'orpaillage') return subcat === 'oc';
-      return true;
-    });
-  }
+function filterByCategory(items, view){
+  const cat = currentCategory[view];
+  if(!cat || cat === 'all') return items;
+
+  // Photos capture = éléments normaux (General/photos)
+  if(cat === 'capture') return items.filter(it => it.type !== 'infraction');
+
+  return items.filter(it => {
+    if(it.type !== 'infraction') return false;
+    const subcat = it.subcategory || 'simple';
+    if(cat === 'routiere') return subcat === 'ir';
+    if(cat === 'installation') return subcat === 'an';
+    if(cat === 'orpaillage') return subcat === 'oc';
+    return true;
+  });
+}
 
   function filterPvByCategory(items){
     const bucket = currentCategory.pv;
@@ -4735,7 +4739,9 @@
       card.className = 'image-card';
       card.setAttribute('tabindex', '0');
       const isInfraction = img.type === 'infraction';
-      const tagInfo = getSubcategoryLabel(img.subcategory || (isInfraction ? 'simple' : 'normal'));
+      const tagInfo = isInfraction
+  ? getSubcategoryLabel(img.subcategory || 'simple')
+  : { label: '📸 Capture', class: 'tag-ok' };
       
       const displayTitle = (img.filename || 'Image').length > 25 ? 
         (img.filename || 'Image').substring(0, 22) + '...' : 
