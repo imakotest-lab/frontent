@@ -2796,7 +2796,7 @@
     savePvDecisions();
   }
 
-  function cloturerPv(pvId){
+  async function cloturerPv(pvId){
     const d = getPvDecision(pvId);
     if (d.cloture) {
       showToast('🔒 Ce PV est déjà clôturé.');
@@ -2809,7 +2809,27 @@
     const confirmed = confirm(`Clôturer définitivement le PV ${pvId} ?\n\nCette action est irréversible : le dossier sera verrouillé en lecture seule.`);
     if (!confirmed) return;
 
+    const pv = allPv.find(p => p.id === pvId);
+    if (!pv) { showToast('❌ PV introuvable.'); return; }
+
+    try {
+      const res = await fetch(`${API_BASE}/api/pv/cloture`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pv_path: pv.full_path })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        showToast('❌ ' + (err.erreur || 'Clôture refusée par le serveur'));
+        return;
+      }
+    } catch (e) {
+      showToast('❌ Serveur injoignable, clôture non enregistrée.');
+      return;
+    }
+
     setPvDecision(pvId, { cloture: true });
+    pv.cloture = true;
     showToast(`🔒 PV ${pvId} clôturé`);
     updatePvSidebarCounts();
     filteredPvData = filterPvByCategory(allPv);
@@ -4802,14 +4822,13 @@ function filterByCategory(items, view){
       if (data.erreur) throw new Error(data.erreur);
       
       allPv = data.pv || [];
-      
       allPv = allPv.map(pv => {
         const subcat = pv.subcategory || 'simple';
         const category = subcat === 'ir' ? 'routiere' 
                   : subcat === 'an' ? 'installation' 
                   : subcat === 'oc' ? 'orpaillage' 
                   : 'routiere';
-        return {
+                return {
           id: pv.numero_pv || pv.filename || 'PV-inconnu',
           agent: pv.agent || 'Inconnu',
           date: pv.mtime ? new Date(pv.mtime * 1000) : new Date(),
@@ -4821,10 +4840,25 @@ function filterByCategory(items, view){
           status_class: pv.statut === 'Signé' ? 'tag-ok' : 
                         pv.statut === 'En cours' ? 'tag-pending' : 'tag-infraction',
           full_path: pv.full_path || '',
-          filename: pv.filename || ((pv.numero_pv || 'PV') + '.docx')
+          filename: pv.filename || ((pv.numero_pv || 'PV') + '.docx'),
+          decision: pv.decision || 'attente',
+          motif: pv.motif || '',
+          commentaire: pv.commentaire || '',
+          cloture: !!pv.cloture
         };
       });
-      
+
+      // Le serveur est la source de vérité : on écrase l'état local
+      allPv.forEach(p => {
+        pvDecisions[p.id] = {
+          decision: p.decision,
+          motif: p.motif,
+          commentaire: p.commentaire,
+          cloture: p.cloture
+        };
+      });
+      savePvDecisions();
+
       updatePvSidebarCounts();
       filteredPvData = filterPvByCategory(allPv);
       currentPvPage = 1;
@@ -5696,43 +5730,48 @@ function filterByCategory(items, view){
     },
 
     async submit() {
-  const choice = document.querySelector('input[name="decisionChoice"]:checked');
-  if (!choice) { showToast('❌ Sélectionnez Accepter ou Rejeter avant de valider.'); return; }
-  const motif = this.motifSelect.value;
-  if (!motif) { showToast('❌ Sélectionnez un motif avant de valider.'); return; }
+      const choice = document.querySelector('input[name="decisionChoice"]:checked');
+      if (!choice) { showToast('❌ Sélectionnez Accepter ou Rejeter avant de valider.'); return; }
+      const motif = this.motifSelect.value;
+      if (!motif) { showToast('❌ Sélectionnez un motif avant de valider.'); return; }
 
-  const commentaire = this.commentBox.value.trim();
-  setPvDecision(this.pvId, { decision: choice.value, motif, commentaire });
+      const commentaire = this.commentBox.value.trim();
+      const pv = allPv.find(p => p.id === this.pvId);
+      if (!pv) { showToast('❌ PV introuvable.'); return; }
 
-  // === Envoi direct de la décision à l'API (met à jour le PV sur le serveur) ===
-  const pv = allPv.find(p => p.id === this.pvId);
-  if (pv) {
-    try {
-      const res = await fetch(`${API_BASE}/api/pv/decision`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          pv_path: pv.full_path,
-          decision: choice.value,
-          motif,
-          commentaire
-        })
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        showToast('⚠️ Décision enregistrée, mais PV non mis à jour : ' + (err.erreur || res.status));
+      try {
+        const res = await fetch(`${API_BASE}/api/pv/decision`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            pv_path: pv.full_path,
+            decision: choice.value,
+            motif,
+            commentaire
+          })
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          showToast('❌ ' + (err.erreur || 'Erreur ' + res.status));
+          return;
+        }
+      } catch (e) {
+        showToast('❌ Serveur injoignable, décision non enregistrée.');
+        return;
       }
-    } catch (e) {
-      showToast('⚠️ Décision enregistrée, mais serveur injoignable.');
-    }
-  }
 
-  showToast(choice.value === 'accepte' ? `✅ PV ${this.pvId} accepté` : `❌ PV ${this.pvId} rejeté`);
-  updatePvSidebarCounts();
-  filteredPvData = filterPvByCategory(allPv);
-  displayPvFromAPI(filteredPvData);
-  this.close();
-},
+      // Le serveur a accepté : on met à jour l'affichage
+      setPvDecision(this.pvId, { decision: choice.value, motif, commentaire });
+      pv.decision = choice.value;
+      pv.motif = motif;
+      pv.commentaire = commentaire;
+
+      showToast(choice.value === 'accepte' ? `✅ PV ${this.pvId} accepté` : `❌ PV ${this.pvId} rejeté`);
+      updatePvSidebarCounts();
+      filteredPvData = filterPvByCategory(allPv);
+      displayPvFromAPI(filteredPvData);
+      this.close();
+    },
 
     close() {
       this.el.classList.remove('open');
